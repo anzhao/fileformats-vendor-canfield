@@ -1,25 +1,33 @@
-import logging
 import json
+import logging
 import os
-from pathlib import Path, PurePath
 import typing as ty
+from pathlib import Path, PurePath
 
+from fileformats.application import Json, Pdf
 from fileformats.core import extra_implementation
 from fileformats.generic import UnicodeFile
-from fileformats.application import Json, Pdf
 from fileformats.medimage.base import MedicalImagingData
 
 from fileformats.vendor.canfield.medimage import (
+    DexiDataDir,
+    LesionAnalysisDir,
     TomSeedLog,
     TomTrackLog,
     TrackedDir,
-    DexiDataDir,
-    WholeBodyCapture,
     VectraExport,
-    LesionAnalysisDir,
+    WholeBodyCapture,
 )
+from fileformats.vendor.canfield.medimage.whole_body import Cptr, Sfcm, Tom
 
 logger = logging.getLogger(__name__)
+
+
+# The containers are copied by `deidentify_nested`, which deidentifies the formats
+# nested within them (their validated properties) with their own implementations,
+# and then their own files that may contain PHI are deidentified in place in the copy.
+# `deidentify` stages the output, so it is only moved into the requested directory
+# once it is complete.
 
 
 @extra_implementation(MedicalImagingData.deidentify)
@@ -27,15 +35,11 @@ def vectra_deidentify(
     export_dir: VectraExport,
     out_dir: os.PathLike[str],
     recipe: None = None,
-    in_place: bool = False,
     **kwargs: ty.Any,
 ) -> VectraExport:
     """
-    Deidentifies the image by stripping any subject-identifying information from the
-    image header. The exact implementation of this method will depend on the
-    specific image format and the type of identifying information that is present. The
-    output files should be named with a new file path(s) that is derived from the metadata,
-    such that it doesn't contain any subject-identifying information within it.
+    Deidentifies a Canfield data export directory, deidentifying the whole-body
+    captures and lesion analyses within it and redacting its DermX PDF reports.
 
     Parameters
     ----------
@@ -51,19 +55,10 @@ def vectra_deidentify(
     VectraExport
         The deidentified VectraExport object.
     """
-    if not in_place:
-        export_dir = export_dir.copy(dest_dir=Path(out_dir))
-
-    for whole_body_capture_dir in export_dir.whole_body_capture_dirs.values():
-        whole_body_capture_dir.deidentify(out_dir, in_place=True, **kwargs)
-
-    for lesion_analysis_dir in export_dir.lesion_analysis_dirs.values():
-        lesion_analysis_dir.deidentify(out_dir, in_place=True, **kwargs)
-
-    for report in export_dir.dermx_reports:
+    deidentified = export_dir.deidentify_nested(out_dir, **kwargs)
+    for report in deidentified.dermx_reports:
         pdf_report_deidentify(report)
-
-    return export_dir
+    return deidentified
 
 
 @extra_implementation(MedicalImagingData.deidentify)
@@ -71,19 +66,12 @@ def vectra_3d_capture_deidentify(
     capture_dir: WholeBodyCapture,
     out_dir: os.PathLike[str],
     recipe: None = None,
-    in_place: bool = False,
     **kwargs: ty.Any,
 ) -> WholeBodyCapture:
-    if not in_place:
-        capture_dir = capture_dir.copy(dest_dir=Path(out_dir))
-
-    if capture_dir.sglue_log_file:
-        sglue_log_deidentify(capture_dir.sglue_log_file)
-
-    for tracked_dir in capture_dir.tracked_dirs.values():
-        tracked_dir.deidentify(out_dir, in_place=True, **kwargs)
-
-    return capture_dir
+    deidentified = capture_dir.deidentify_nested(out_dir, **kwargs)
+    if deidentified.sglue_log_file:
+        sglue_log_deidentify(deidentified.sglue_log_file)
+    return deidentified
 
 
 @extra_implementation(MedicalImagingData.deidentify)
@@ -91,17 +79,11 @@ def tracked_dir_deidentify(
     tracked_dir: TrackedDir,
     out_dir: os.PathLike[str],
     recipe: None = None,
-    in_place: bool = False,
     **kwargs: ty.Any,
 ) -> TrackedDir:
-    if not in_place:
-        tracked_dir = tracked_dir.copy(dest_dir=Path(out_dir))
-
-    tracked_dir.seed_log_file.deidentify(out_dir, in_place=True, **kwargs)
-    tracked_dir.track_log_file.deidentify(out_dir, in_place=True, **kwargs)
-    tracking_log_deidentify(tracked_dir.tracking_log_file)
-
-    return tracked_dir
+    deidentified = tracked_dir.deidentify_nested(out_dir, **kwargs)
+    tracking_log_deidentify(deidentified.tracking_log_file)
+    return deidentified
 
 
 @extra_implementation(MedicalImagingData.deidentify)
@@ -109,16 +91,11 @@ def lesion_analysis_deidentify(
     lesion_dir: LesionAnalysisDir,
     out_dir: os.PathLike[str],
     recipe: None = None,
-    in_place: bool = False,
     **kwargs: ty.Any,
 ) -> LesionAnalysisDir:
-    if not in_place:
-        lesion_dir = lesion_dir.copy(dest_dir=Path(out_dir))
-
-    for dexi_dir in lesion_dir.dexi_dirs.values():
-        dexi_dir.deidentify(out_dir, in_place=True, **kwargs)
-
-    return lesion_dir
+    # Registered explicitly (rather than relying on the default for `contains_phi =
+    # "nested"`) so callers can look up that it doesn't take a recipe
+    return lesion_dir.deidentify_nested(out_dir, **kwargs)
 
 
 @extra_implementation(MedicalImagingData.deidentify)
@@ -126,15 +103,25 @@ def dexi_data_dir_deidentify(
     dexi_data_dir: DexiDataDir,
     out_dir: os.PathLike[str],
     recipe: None = None,
-    in_place: bool = False,
     **kwargs: ty.Any,
 ) -> DexiDataDir:
-    if not in_place:
-        dexi_data_dir = dexi_data_dir.copy(dest_dir=Path(out_dir))
+    deidentified = dexi_data_dir.deidentify_nested(out_dir, **kwargs)
+    result_json_deidentify(deidentified.result_file)
+    return deidentified
 
-    result_json_deidentify(dexi_data_dir.result_file)
 
-    return dexi_data_dir
+@extra_implementation(MedicalImagingData.deidentify)
+def copy_unchanged_deidentify(
+    fileset: Tom | Sfcm | Cptr,
+    out_dir: os.PathLike[str],
+    recipe: None = None,
+    **kwargs: ty.Any,
+) -> Tom | Sfcm | Cptr:
+    """The 3D mesh, calibration and capture-settings files have no known identifying
+    metadata to strip, so are copied unchanged (as they were before nested
+    deidentification required an implementation for every nested format that may
+    contain PHI)"""
+    return fileset.copy(Path(out_dir), make_dirs=True)
 
 
 def pdf_report_deidentify(pdf_report: Pdf) -> Pdf:
@@ -167,55 +154,54 @@ def pdf_report_deidentify(pdf_report: Pdf) -> Pdf:
     pdf += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n"
     pdf += "".join(f"{off:010d} 00000 n \n" for off in offsets)
     pdf += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF"
-    pdf_report.save(pdf)
+    pdf_report.fspath.write_bytes(pdf.encode("latin-1"))
 
     return pdf_report
 
 
 def result_json_deidentify(result_json: Json) -> Json:
     """
-    De-identify the `result.json` file generated by DEXI version 1
+    De-identify the `result.json` file generated by DEXI version 1, in place
     Replaces the `ImageLocation` field in each `OutputImages` entry with just the filename, removing any directory paths.
     Parameters:
     - result_json: Path to the `result.json` file
     Returns:
-    - A JSON string with de-identified data
+    - The de-identified `result.json` file
     """
     if result_json.name != "result.json":
         raise ValueError(f"Expected 'result.json', but got '{result_json.name}'")
 
+    if result_json.fspath.parent.name != "DexiData":
+        return result_json
+
     with open(result_json) as resultjson_contents:
         json_data = json.load(resultjson_contents)
 
-        if result_json.parent.name != "DexiData":
-            return Json(json.dumps(json_data, indent=2))
+    algorithms = json_data.get("Algorithms", [])
+    if not isinstance(algorithms, list):
+        logger.warning("Algorithms is not a list.")
+        return result_json
 
-        algorithms = json_data.get("Algorithms", [])
+    for algorithm in algorithms:
+        if not isinstance(algorithm, dict):
+            continue
 
-        if not isinstance(algorithms, list):
-            logger.warning("Algorithms is not a list.")
-            return Json(json.dumps(json_data, indent=4))
+        output_images = algorithm.get("OutputImages", [])
 
-        for algorithm in algorithms:
-            if not isinstance(algorithm, dict):
+        if not isinstance(output_images, list):
+            logger.warning("OutputImages is not a list.")
+            continue
+
+        for image in output_images:
+            if not isinstance(image, dict):
                 continue
 
-            output_images = algorithm.get("OutputImages", [])
+            location = image.get("ImageLocation")
+            if location and isinstance(location, str):
+                image["ImageLocation"] = PurePath(location).name
 
-            if not isinstance(output_images, list):
-                logger.warning("OutputImages is not a list.")
-                return Json(json.dumps(json_data, indent=4))
-
-            for image in output_images:
-                if not isinstance(image, dict):
-                    continue
-
-                location = image.get("ImageLocation")
-                if location and isinstance(location, str):
-                    location_filename = PurePath(location)
-                    image["ImageLocation"] = location_filename.name
-
-    return Json(json.dumps(json_data, indent=4))
+    result_json.fspath.write_text(json.dumps(json_data, indent=4))
+    return result_json
 
 
 def log_file_deidentify(
@@ -229,15 +215,7 @@ def log_file_deidentify(
     Returns:
     - A string containing the de-identified log contents
     """
-    with open(log_file) as log_contents:
-        lines = log_contents.readlines()
-
-    deidentified_lines = []
-    for line in lines:
-        if not line.startswith(sensitive_line_prefixes):
-            deidentified_lines.append(line)
-
-    log_file.save("".join(deidentified_lines))
+    log_file.fspath.write_text(_filter_log_lines(log_file, sensitive_line_prefixes))
     return log_file
 
 
@@ -260,23 +238,22 @@ def tom_seed_log_deidentify(
     tom_seed_log: TomSeedLog,
     out_dir: os.PathLike[str],
     recipe: None = None,
-    in_place: bool = False,
     **kwargs: ty.Any,
 ) -> TomSeedLog:
     """
-    De-identify the `tom-seed.log` file by removing lines that start with "loading".
+    De-identify the `tom-seed.log` file by removing lines that start with "loading"
+    or "loaded".
     Parameters:
     - tom_seed_log: Path to the `tom-seed.log` file
+    - out_dir: The directory to write the de-identified copy of the log to
     Returns:
-    - A string containing the de-identified log contents
+    - The de-identified log file
     """
-    if not in_place:
-        tom_seed_log = tom_seed_log.copy(Path(out_dir))
     if not tom_seed_log.name.endswith("tom-seed.log"):
         raise ValueError(f"Expected 'tom-seed.log', but got '{tom_seed_log.name}'")
-
-    file_specific_prefixes = ("loading", "loaded")
-    return TomSeedLog(log_file_deidentify(tom_seed_log, file_specific_prefixes))
+    deidentified = tom_seed_log.copy(Path(out_dir), make_dirs=True)
+    log_file_deidentify(deidentified, ("loading", "loaded"))
+    return deidentified
 
 
 @extra_implementation(MedicalImagingData.deidentify)
@@ -284,23 +261,34 @@ def tom_track_log_deidentify(
     tom_track_log: TomTrackLog,
     out_dir: os.PathLike[str],
     recipe: None = None,
-    in_place: bool = False,
     **kwargs: ty.Any,
 ) -> TomTrackLog:
     """
-    De-identify the `tom-track-log.txt` file by removing all contents.
+    De-identify the `tom-track.log` file by removing lines that start with
+    "no images" or "mesh vertex".
     Parameters:
     - tom_track_log: Path to the `tom-track.log` file
+    - out_dir: The directory to write the de-identified copy of the log to
     Returns:
-    - An empty string, effectively removing all contents of the log
+    - The de-identified log file
     """
-    if not in_place:
-        tom_track_log = tom_track_log.copy(Path(out_dir))
     if not tom_track_log.name.endswith("tom-track.log"):
         raise ValueError(f"Expected 'tom-track.log', but got '{tom_track_log.name}'")
+    deidentified = tom_track_log.copy(Path(out_dir), make_dirs=True)
+    log_file_deidentify(deidentified, ("no images", "mesh vertex"))
+    return deidentified
 
-    file_specific_prefixes = ("no images", "mesh vertex")
-    return TomTrackLog(log_file_deidentify(tom_track_log, file_specific_prefixes))
+
+def _filter_log_lines(
+    log_file: UnicodeFile, sensitive_line_prefixes: str | tuple[str, ...]
+) -> str:
+    """The contents of the log file without the lines that start with the prefixes"""
+    with open(log_file) as log_contents:
+        return "".join(
+            line
+            for line in log_contents
+            if not line.startswith(sensitive_line_prefixes)
+        )
 
 
 def tracking_log_deidentify(log_file: UnicodeFile) -> UnicodeFile:

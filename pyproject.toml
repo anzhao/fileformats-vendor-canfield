@@ -7,7 +7,7 @@ name = "fileformats-vendor-canfield"
 description = "Classes for representing different file formats in Python classes for use in type hinting in data workflows"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["fileformats >= 0.19.0", "fileformats-medimage >= 0.14.0"]
+dependencies = ["fileformats >= 0.19.0", "fileformats-medimage >= 0.15.3"]
 license = { file = "LICENSE" }
 authors = [{ name = "André Venne", email = "vennand@gmail.com" }]
 maintainers = [{ name = "André Venne", email = "vennand@gmail.com" }]

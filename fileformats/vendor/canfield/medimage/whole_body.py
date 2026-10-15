@@ -43,6 +43,8 @@ class CalibDir(Directory, MedicalImagingData):
     """Per-capture geometric calibration data for all of the stereo pod
     cameras."""
 
+    contains_phi = "nested"
+
     @validated_property
     def sfcm_files(self) -> dict[str, Sfcm]:
         """Calibration stereo maps for each pod/side, keyed by e.g. 'a10A'."""
@@ -116,6 +118,8 @@ class TrackedDir(Directory, MedicalImagingData):
 class WholeBodyAnalysisDir(Directory, MedicalImagingData):
     """Downstream lesion-detection/analysis pipeline output run over the
     whole-body capture, versioned by the analysis software release."""
+
+    contains_phi = "nested"
 
     @validated_property
     def lesion_data_file(self) -> Json:
@@ -204,7 +208,7 @@ class WholeBodyCapture(Directory, MedicalImagingData):
         path = self.fspath / "sglue-log.txt"
         return UnicodeFile(path) if path.exists() else None
 
-    @property
+    @validated_property
     def tracked_dirs(self) -> dict[str, TrackedDir]:
         """Tracking sub-directories, keyed by capture GUID."""
         dct = {
