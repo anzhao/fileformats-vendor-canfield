@@ -7,7 +7,7 @@ name = "fileformats-vendor-canfield"
 description = "Classes for representing different file formats in Python classes for use in type hinting in data workflows"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["fileformats >= 0.19.0", "fileformats-medimage >= 0.14.0"]
+dependencies = ["fileformats >= 0.19.0", "fileformats-medimage >= 0.15.3"]
 license = { file = "LICENSE" }
 authors = [{ name = "André Venne", email = "vennand@gmail.com" }]
 maintainers = [{ name = "André Venne", email = "vennand@gmail.com" }]
@@ -31,6 +31,7 @@ dynamic = ["version"]
 [project.optional-dependencies]
 dev = ["black", "pre-commit", "codespell", "flake8", "flake8-pyproject"]
 test = [
+    "fileformats-extras[application]",
     "pytest >=8.1",
     "pytest-env>=0.6.2",
     "pytest-cov>=2.12.1",

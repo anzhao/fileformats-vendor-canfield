@@ -89,6 +89,8 @@ class DanaosDir(Directory, MedicalImagingData):
 class LesionAnalysisDir(Directory, MedicalImagingData):
     """Canfield Vectra lesion capture and analysis"""
 
+    contains_phi = "nested"
+
     @validated_property
     def captureinfo_file(self) -> UnicodeFile:
         """The capture info file in the directory."""
