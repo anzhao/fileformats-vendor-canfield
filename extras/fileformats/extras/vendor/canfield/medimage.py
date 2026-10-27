@@ -68,6 +68,9 @@ def vectra_3d_capture_deidentify(
     recipe: None = None,
     **kwargs: ty.Any,
 ) -> WholeBodyCapture:
+
+print(">>> vectra_3d_capture_deidentify CALLED")
+
     deidentified = capture_dir.deidentify_nested(out_dir, **kwargs)
     if deidentified.sglue_log_file:
         sglue_log_deidentify(deidentified.sglue_log_file)
